@@ -8,7 +8,8 @@ from sklearn.linear_model import LinearRegression
 from dataclasses import dataclass
 
 EPSILON = 1e-9  # For numerical stability in the log space
-sig = lambda s: 1 / (1 + np.exp(-s))
+sig = lambda z: 1 / (1 + np.exp(-z))
+sm = lambda z: np.exp(z) / np.sum(np.exp(z), axis=1)[:, None]
 
 
 class Calibration(ABC):
@@ -124,6 +125,19 @@ class BetaCalibration(Calibration):
             new_probs = self.normalize(new_probs)
 
         return new_probs
+
+
+class TemperatureScaling(Calibration):
+
+    def __init__(self, temperature: float):
+        self.temperature = temperature
+
+    def fit(self, probs: np.ndarray, classes: np.ndarray):
+        pass
+
+    def transform(self, probs: np.ndarray, normalize: bool = True):
+        logits = np.log(probs / (1 - probs + EPSILON) + EPSILON)
+        return sm(logits / self.temperature)
 
 
 class HistogramBasedCalibration(Calibration, ABC):
