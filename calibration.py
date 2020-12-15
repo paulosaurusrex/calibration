@@ -4,7 +4,7 @@ from typing import List
 import numpy as np
 from sklearn.isotonic import IsotonicRegression
 from sklearn.linear_model import LogisticRegression
-from regression import Regression, LinearRegression, GammaRegression
+from regression import Regression, LinearRegression, ConstrainedLinearRegression, GammaRegression
 from utils import EPSILON, sm, normalize_probabilities
 
 
@@ -177,9 +177,6 @@ class BinningCalibration:
 
 
 # Unbounded methods
-
-
-
 class RegressionCalibration(ABC):
 
     regressions: List[Regression] = []
@@ -200,8 +197,7 @@ class RegressionCalibration(ABC):
             curve = rel_fit.get_curve(self.num_points)
 
             regression = self.get_regression_method()
-            x = curve.bin_avg_probs.reshape(-1, 1)
-            regression.fit(x, curve.bin_heights)
+            regression.fit(curve.bin_avg_probs, curve.bin_heights)
 
             self.regressions.append(regression)
 
@@ -210,7 +206,7 @@ class RegressionCalibration(ABC):
 
         for i, regression in enumerate(self.regressions):
             z = probs[:, i]
-            logits = regression.predict(z.reshape(-1, 1))
+            logits = regression.predict(z)
 
             if self.clip_logits:
                 logits[logits < 0] = 0
@@ -229,6 +225,12 @@ class LinearRegressionCalibration(RegressionCalibration):
 
     def get_regression_method(self):
         return LinearRegression()
+
+
+class ConstrainedLinearRegressionCalibration(RegressionCalibration):
+
+    def get_regression_method(self):
+        return ConstrainedLinearRegression()
 
 
 class GammaRegressionCalibration(RegressionCalibration):
