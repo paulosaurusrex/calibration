@@ -4,12 +4,8 @@ from typing import List
 import numpy as np
 from sklearn.isotonic import IsotonicRegression
 from sklearn.linear_model import LogisticRegression
-from sklearn.linear_model import LinearRegression
-from dataclasses import dataclass
-
-EPSILON = 1e-9  # For numerical stability in the log space
-sig = lambda z: 1 / (1 + np.exp(-z))
-sm = lambda z: np.exp(z) / np.sum(np.exp(z), axis=1)[:, None]
+from regression import Regression, LinearRegression, GammaRegression
+from utils import EPSILON, sm, normalize_probabilities
 
 
 class Calibration(ABC):
@@ -140,17 +136,15 @@ class TemperatureScaling(Calibration):
         return sm(logits / self.temperature)
 
 
-class HistogramBasedCalibration(Calibration, ABC):
+class BinningCalibration:
 
-    # One reliability curve per class
     curves: List[ReliabilityCurve]
-
-
-@dataclass
-class BinningCalibration(HistogramBasedCalibration):
-
     num_points: int = 10
     even_mass: bool = True
+
+    def __init__(self, num_points: int = 10, even_mass: bool = True):
+        self.num_points = num_points
+        self.even_mass = even_mass
 
     def fit(self, probs: np.ndarray, classes: np.ndarray):
         self.curves = []
@@ -177,15 +171,18 @@ class BinningCalibration(HistogramBasedCalibration):
             new_probs[:, i] = calibrated_z
 
         if normalize:
-            new_probs = self.normalize(new_probs)
+            new_probs = normalize_probabilities(new_probs)
 
         return new_probs
 
 
 # Unbounded methods
-class LinearRegressionCalibration(HistogramBasedCalibration):
 
-    regressions: List[LinearRegression] = []
+
+
+class RegressionCalibration(ABC):
+
+    regressions: List[Regression] = []
 
     def __init__(self, kernel, num_points: int = 10, even_mass: bool = True, clip_logits: bool = False):
         self.kernel = kernel
@@ -202,7 +199,7 @@ class LinearRegressionCalibration(HistogramBasedCalibration):
             rel_fit = ReliabilityFit(x, y, self.kernel, self.even_mass)
             curve = rel_fit.get_curve(self.num_points)
 
-            regression = LinearRegression()
+            regression = self.get_regression_method()
             x = curve.bin_avg_probs.reshape(-1, 1)
             regression.fit(x, curve.bin_heights)
 
@@ -222,4 +219,20 @@ class LinearRegressionCalibration(HistogramBasedCalibration):
             new_probs[:, i] = logits
 
         return new_probs
+
+    @abstractmethod
+    def get_regression_method(self):
+        ...
+
+
+class LinearRegressionCalibration(RegressionCalibration):
+
+    def get_regression_method(self):
+        return LinearRegression()
+
+
+class GammaRegressionCalibration(RegressionCalibration):
+
+    def get_regression_method(self):
+        return GammaRegression()
 
