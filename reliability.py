@@ -8,6 +8,7 @@ from matplotlib import cm
 import matplotlib.pyplot as plt
 from matplotlib.ticker import MultipleLocator, FixedLocator
 import math
+from utils import MIN_BIN_WIDTH
 
 
 class Kernel(ABC):
@@ -56,7 +57,7 @@ class DeltaKernel(Kernel):
 
 class GaussianKernel(Kernel):
     """Class to represent a convolutional Gaussian filter."""
-    SMALLEST_STD = 1E-5
+    SMALLEST_STD = MIN_BIN_WIDTH
 
     def __init__(self, std: float = None):
         if std is not None and std <= 0:
@@ -216,15 +217,11 @@ class ReliabilityCurve:
         ax.xaxis.set_major_locator(MultipleLocator(0.1))
         ax.yaxis.set_major_locator(MultipleLocator(0.1))
 
-    def is_in_bin(self, prob: float, bin_idx: int) -> bool:
-        left_prob = round(
-            self.bin_centers[bin_idx] - self.bin_widths[bin_idx] / 2, 8)
-        right_prob = round(
-            self.bin_centers[bin_idx] + self.bin_widths[bin_idx] / 2, 8)
-        if bin_idx == len(self.bin_centers) - 1 or self.even_mass:
-            return left_prob <= round(prob, 8) <= right_prob
-        else:
-            return left_prob <= round(prob, 8) < right_prob
+    def get_bin_limits(self, bin_idx: int) -> Tuple[float, float]:
+        left_prob = self.bin_centers[bin_idx] - self.bin_widths[bin_idx] / 2
+        right_prob = self.bin_centers[bin_idx] + self.bin_widths[bin_idx] / 2
+
+        return left_prob, right_prob
 
     def ece(self, use_bin_centers=False):
         """
@@ -280,8 +277,8 @@ class ReliabilityFit:
                 left_prob = last_bin_end
                 right_prob = (sorted_probs[right_idx] + sorted_probs[
                     next_left_idx]) / 2
-                bin_width = (right_prob - left_prob)
-                mid_prob = left_prob + bin_width / 2
+                bin_width = max(right_prob - left_prob, MIN_BIN_WIDTH)
+                mid_prob = (right_prob - left_prob) / 2 + left_prob
                 last_bin_end = right_prob
 
                 bin_centers.append(mid_prob)

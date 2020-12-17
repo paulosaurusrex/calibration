@@ -21,7 +21,10 @@ class Calibration(ABC):
 
     @staticmethod
     def normalize(probs: np.ndarray):
-        return probs / np.sum(probs, axis=1)[:, None]
+        if probs.shape[1] > 1:
+            return probs / np.sum(probs, axis=1)[:, None]
+        else:
+            return probs
 
 
 class IsotonicCalibration(Calibration):
@@ -164,9 +167,19 @@ class BinningCalibration:
             bin_idx = 0
             calibrated_z = np.zeros_like(z)
             for z_prob, idx in sorted_z:
-                while not curve.is_in_bin(z_prob, bin_idx):
-                    bin_idx += 1
-                calibrated_z[idx] = curve.bin_heights[bin_idx]
+                left_prob, right_prob = curve.get_bin_limits(bin_idx)
+                last_bin = bin_idx == len(curve.bin_centers) - 1
+
+                if not last_bin:
+                    while z_prob >= right_prob:
+                        bin_idx += 1
+                        left_prob, right_prob = curve.get_bin_limits(bin_idx)
+
+                if z_prob < left_prob:
+                    # There's no bin for the probability in the calibrated curve
+                    calibrated_z[idx] = 0
+                else:
+                    calibrated_z[idx] = curve.bin_heights[bin_idx]
 
             new_probs[:, i] = calibrated_z
 
@@ -214,6 +227,9 @@ class RegressionCalibration(ABC):
 
             new_probs[:, i] = logits
 
+        if normalize:
+            new_probs = normalize_probabilities(new_probs)
+
         return new_probs
 
     @abstractmethod
@@ -237,4 +253,50 @@ class GammaRegressionCalibration(RegressionCalibration):
 
     def get_regression_method(self):
         return GammaRegression()
+
+if __name__ == '__main__':
+    import numpy as np
+    from sklearn import datasets
+    from sklearn.ensemble import RandomForestClassifier
+    import matplotlib.pyplot as plt
+
+    def get_data(num_probs=1000):
+        np.random.seed(42)
+        X, y = datasets.make_classification(n_samples=6000, n_features=20, n_informative=3, n_redundant=17, n_classes=3)
+
+        train_samples = 6000 - 2*num_probs  # Samples used for training the model
+        X_train = X[:train_samples]
+        X_test = X[train_samples:]
+        y_train = y[:train_samples]
+        y_test = y[train_samples:]
+
+        rfc = RandomForestClassifier()
+        rfc.fit(X_train, y_train)
+        prob_pos = rfc.predict_proba(X_test)
+
+        probs_train = prob_pos[:num_probs, :]  # Used to calibrate the curves
+        classes_train = y_test[:num_probs]
+        probs_val = prob_pos[num_probs:, :]  # Used to test the calibration
+        classes_val = y_test[num_probs:]
+
+        return probs_train, classes_train, probs_val, classes_val
+
+
+    probs_train, classes_train, probs_val, classes_val = get_data(2000)
+    from reliability import GaussianKernel
+
+    curve = ReliabilityFit(probs_train[:, 0], classes_train == 0, GaussianKernel(), True).get_curve(10)
+
+    binning = BetaCalibration()
+    binning.fit(probs_train, classes_train)
+
+    X = np.empty((100, 3))
+    X[:, 0] = np.linspace(0, 1, 100)
+    X[:, 1] = np.linspace(0, 1, 100)
+    X[:, 2] = np.linspace(0, 1, 100)
+    y = binning.transform(X, False)
+
+    plt.plot(X[:, 2], y[:, 2])
+    plt.show()
+    # probs = binning.transform(probs_val, normalize=False)
 
